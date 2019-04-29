@@ -90,3 +90,7 @@ def download():
     game_ids = get_game_ids(season_links)
     games_ids_to_fetch = get_skip_over(game_ids)
     fetch_and_write(games_ids_to_fetch)
+
+
+if __name__ == '__main__':
+    download()
