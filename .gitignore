@@ -2,6 +2,7 @@ IPL/
 ODIs/
 __pycahce__/
 env/
-.DS_Store/
+.DS_Store
 .idea/
 .ipynb_checkpoints
+*~
