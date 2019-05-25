@@ -1,6 +1,6 @@
 # uncompyle6 version 3.3.1
 # Python bytecode 3.7 (3394)
-# Decompiled from: Python 2.7.16 (default, Apr 12 2019, 15:32:52) 
+# Decompiled from: Python 2.7.16 (default, Apr 12 2019, 15:32:52)
 # [GCC 4.2.1 Compatible Apple LLVM 10.0.0 (clang-1000.11.45.5)]
 # Embedded file name: /Users/kaushik/win_probability/predictor.py
 # Size of source mod 2**32: 11594 bytes
@@ -47,12 +47,12 @@ class Predictor(object):
             innings score
         """
         if over > self.max_over and innings == 2:
-            over == self.max_over - 1
+            over == self.max_over
         if innings == 1:
             params = self.fit_df_1[self.fit_df_1.overs == over]
         else:
             params = self.fit_df_2[self.fit_df_2.overs == over]
-        params_2 = self.fit_df_2[self.fit_df_2.overs == 0]
+        params_2 = self.fit_df_2[self.fit_df_2.overs == 1]
         return self.predict_fn(innings, run_rate, wickets, required_run_rate, self.max_over, params, params_2)
 
     def predict_game(self, ball_by_ball_df):
@@ -61,7 +61,8 @@ class Predictor(object):
          'innings', 'overs_balls', 'over_num', 'ball_num', 'runs', 'WicketsLost', 'predicted_runs_m1sd',
          'predicted_runs', 'predicted_runs_p1sd', 'target', 'win_probability']
         df = ball_by_ball_df.copy()
-        df['BallN'] = df.Ball.apply(lambda x: x - x // 1) * 100
+        df['BallN'] = (df.Ball.apply(lambda x: x - x // 1)) * 100
+        df['BallN'] = df.BallN.apply(np.round)
         df['OverKey'] = df.Over - 1 + df.BallN / 6
         first_inn = df[df.Innings == 1]
         first_inn['cumRuns'] = first_inn.Runs.cumsum()
@@ -69,44 +70,44 @@ class Predictor(object):
         second_inn = df[df.Innings == 2]
         second_inn['cumRuns'] = second_inn.Runs.cumsum()
         second_inn['cumWickets'] = second_inn.Wicket.cumsum()
+
         rows = []
         for state in first_inn.itertuples():
             innings = 1
-            ball = min(state.BallN, 6)
-            over = state.Over - 1
+            ball = state.BallN
+            over = state.Over
             runs = state.cumRuns
             wickets = state.cumWickets
             target = state.Target
             run_rate = state.Run_Rate
             required_run_rate = state.Required_Run_Rate
             win_probability, predicted_score_lo, predicted_score_hi, predicted_score = self.predict(innings, over, ball, run_rate, wickets, required_run_rate)
-            rows.append([innings, over + ball / 6.0, over, ball, runs, wickets, predicted_score_lo, predicted_score,
+            rows.append([innings, over - 1 + ball / 6.0, over, ball, runs, wickets, predicted_score_lo, predicted_score,
              predicted_score_hi, target, win_probability])
 
         fid = pd.DataFrame(rows, columns=columns)
         fid.sort_values(by='overs_balls', inplace=True)
+
         rows = []
         for state in second_inn.itertuples():
             innings = 2
-            ball = min(state.BallN, 6)
-            over = state.Over - 1
+            ball = state.BallN
+            over = state.Over
             runs = state.cumRuns
             wickets = state.cumWickets
             target = state.Target
             run_rate = state.Run_Rate
             required_run_rate = float(state.Required_Run_Rate)
-            if over == 19 and ball > 5.1:
+            if over == self.max_over and ball > 5.1:
                 if runs < target:
                     required_run_rate = (target - runs) * 36
-                over = 20
             win_probability, predicted_score_lo, predicted_score_hi, predicted_score = self.predict(innings, over, ball, run_rate, wickets, required_run_rate)
-            rows.append([innings, over + ball / 6.0, over, ball, runs, wickets, predicted_score_lo, predicted_score,
+            rows.append([innings, over -1 + ball / 6.0, over, ball, runs, wickets, predicted_score_lo, predicted_score,
              predicted_score_hi, target, win_probability])
 
         sid = pd.DataFrame(rows, columns=columns)
         sid.sort_values(by='overs_balls', inplace=True)
-        return (
-         fid, sid)
+        return fid, sid
 
 
 def plot_progression(fid, sid, md, max_over=20, game_format='IPL', live=False, location=None):
@@ -139,8 +140,8 @@ def plot_progression(fid, sid, md, max_over=20, game_format='IPL', live=False, l
         if wickets <= 5:
             ax.text(row.overs, row.runs + 10, '{0}-{1}'.format(int(run), int(wickets)))
 
-    team1 = team = md['1st_Innings'].values[0]
-    team2 = team = md['2nd_Innings'].values[0]
+    team1 = md['1st_Innings'].values[0]
+    team2 = md['2nd_Innings'].values[0]
     bbox_props = dict(boxstyle='round', fc='w', ec='0.5', alpha=0.9)
     box_score = '{2}: {0} - {1}'.format(int(fid.runs.max()), int(fid.WicketsLost.max()), team1)
     ax.text(max_over / 2, 50, box_score, ha='center', va='center', size=20, color='red', bbox=bbox_props)
@@ -161,7 +162,7 @@ def plot_progression(fid, sid, md, max_over=20, game_format='IPL', live=False, l
         ax.text(max_over * 3 / 2.0, 50, box_score, ha='center', va='center', size=20, color='blue', bbox=bbox_props)
     ax.set_xlim((0, 2 * max_over))
     ax.set_ylim((0, fid.predicted_runs_p1sd.max()))
-    ax.set_xticks(np.arange(0, 2 * max_over + 1, 4.0))
+    ax.set_xticks(np.arange(0, 2 * max_over + 1, 4.0 if max_over == 20 else 5.0))
     if game_format == 'ODI':
         ax.set_xticklabels([str(x) for x in (0, 5, 10, 15, 20, 25, 30, 35, 40, 45,
                                              50, 5, 10, 15, 20, 25, 30, 35, 40, 45,
