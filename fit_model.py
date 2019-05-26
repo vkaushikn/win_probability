@@ -68,7 +68,8 @@ def create_feature_and_target_vector(ball_by_ball_data: pd.DataFrame,
 
     def get_features_and_target_from_state(state: NamedTuple):
         feature = get_features(state, innings, max_over)
-        target = Target(inn.cumRuns.max() / max_over) if innings == 1 else Target(result)
+        # target = Target(inn.cumRuns.max() / max_over) if innings == 1 else Target(result)
+        target = Target(inn.tail(1).Run_Rate.values[0]) if innings == 1 else Target(result)
         return feature, target
 
     validate_inputs(ball_by_ball_data, innings, max_over, result)
@@ -200,7 +201,7 @@ def predict_game(scorecard: pd.DataFrame, max_over: int, params_1_df: pd.DataFra
     return df_1, df_2
 
 
-def fit(location: Text, max_over: int, sample_percentage: float=1.0) -> None:
+def fit(location: Text, max_over: int, sample_percentage: float=1.0) -> pd.DataFrame:
     """Coordinator function."""
 
     def get_game_ids(_) -> Set[Text]:
@@ -236,109 +237,107 @@ def fit(location: Text, max_over: int, sample_percentage: float=1.0) -> None:
         return []
 
     data =  pipe(None, get_game_ids, map(extract_features_for_game), filter(None), list)
-    print('finished creating data...')
     first_innings = chain(*[x[0] for x in data])
     second_innings = chain(*[x[1] for x in data])
 
-    fit_model(first_innings, 1).to_csv('{0}/first_innings_parameters.csv'.format(location), index=False)
-    fit_model(second_innings, 2).to_csv('{0}/second_innings_parameters.csv'.format(location), index=False)
-    return
+    df1 = fit_model(first_innings, 1)
+    df2 = fit_model(second_innings, 2)
 
-# TODO(kaushik) Refactor this method.
-def plot_game(fid: pd.DataFrame, sid: pd.DataFrame, md: pd.DataFrame, max_over: int, live=False, location=None):
-    """Plots the progression of the game.
+    df1['innings'] = 1
+    df2['innings'] = 2
+    return pd.concat([df1, df2])
 
-    :param fid: First innings predictor output
-    :param sid: Second innings predictor output
-    :param md: match details
-    :param fig: matplotlib fig
-    :param max_over:  max over
-    :param live: to print live probabilities
-    :return: fig object
-    """
-    sid.rename(columns={'overs_balls': 'overs'}, inplace=True)
-    fid.rename(columns={'overs_balls': 'overs'}, inplace=True)
-    sid['overs1'] = sid.overs + max_over
-    fig = plt.figure(figsize=(20, 10))
-    ax = fig.add_subplot(211)
-    ax.plot(fid.overs, fid.Runs, color='r', ls='-')
-    ax.plot(fid.overs, fid.score, color='r', ls='--')
-    ax.fill_between(fid.overs, fid.score_lo, fid.score_hi, color='r', alpha=0.2)
-    fid['foW'] = fid.Wickets - fid.Wickets.shift(1)
-    fow = fid[fid.foW > 0]
-    ax.plot(fow.overs, fow.Runs, 'o', markersize=10, color='r')
-    ax.plot(fow.overs, fow.score, 'o', markersize=10, color='r')
-    for row in fow.itertuples():
-        run = row.Runs
-        wickets = row.Wickets
-        if wickets <= 5:
-            ax.text(row.overs, row.Runs + 10, '{0}-{1}'.format(int(run), int(wickets)))
 
-    team1 = md['1st_Innings'].values[0]
-    team2 = md['2nd_Innings'].values[0]
+def plot_game(fid: pd.DataFrame, sid: pd.DataFrame, md: pd.DataFrame, max_over: int) -> plt.Figure:
+
     bbox_props = dict(boxstyle='round', fc='w', ec='0.5', alpha=0.9)
-    box_score = '{2}: {0} - {1}'.format(int(fid.Runs.max()), int(fid.Wickets.max()), team1)
-    ax.text(max_over / 2, 50, box_score, ha='center', va='center', size=20, color='red', bbox=bbox_props)
-    ax.axvline(max_over, color='k')
-    if len(sid) > 0:
-        ax.plot(sid.overs1, sid.Runs, color='b', ls='-')
-        ax.plot(sid.overs1, sid.Target, color='r', ls='-.')
-        sid['foW'] = sid.Wickets - sid.Wickets.shift(1)
-        fow = sid[sid.foW > 0]
-        ax.plot(fow.overs1, fow.Runs, 'o', markersize=10, color='b')
+
+    def set_title(axis):
+        axis.set_title('{0} v {1} @ {2} on {3}({4})'.
+                 format(team1, team2, venue, day,
+                        'http://www.espncricinfo.com/series/18902/statistics/{0}'.format(md.Game_Id.values[0])))
+
+    def worm_chart(idf, axis, color, ls):
+        axis.plot(idf.overs1, idf.Runs, color=color, ls=ls)
+        fow = idf[idf.foW > 0]
+        axis.plot(fow.overs1, fow.Runs, 'o', markersize=10, color=color)
+
+    def annotate_worm_chart(idf, axis, max_wickets=5):
+        fow = idf[idf.foW > 0]
         for row in fow.itertuples():
             run = row.Runs
             wickets = row.Wickets
-            if wickets <= 5:
-                ax.text(row.overs + max_over, row.Runs + 10, '{0}-{1}'.format(int(run), int(wickets)))
+            if wickets <= max_wickets:
+                axis.text(row.overs1, row.Runs + 10, '{0}-{1}'.format(int(run), int(wickets)))
 
-        box_score = '{2}: {0} - {1}'.format(int(sid.Runs.max()), int(sid.Wickets.max()), team2)
-        ax.text(max_over * 3 / 2.0, 50, box_score, ha='center', va='center', size=20, color='blue', bbox=bbox_props)
-    ax.set_xlim((0, 2 * max_over))
-    ax.set_ylim((0, fid.score_hi.max()))
-    ax.set_xticks(np.arange(0, 2 * max_over + 1, 4.0 if max_over == 20 else 5.0))
-    if max_over == 50:
-        ax.set_xticklabels([str(x) for x in (0, 5, 10, 15, 20, 25, 30, 35, 40, 45,
+    def predicted_score_chart(idf, axis, color, ls):
+        axis.plot(idf.overs1, idf.score, color=color, ls=ls)
+        axis.fill_between(idf.overs1, idf.score_lo, idf.score_hi, color=color, alpha=0.2)
+
+    def box_score(idf, team, axis, color, factor):
+        score = '{2}: {0} - {1}'.format(int(idf.Runs.max()), int(idf.Wickets.max()), team)
+        axis.text(max_over * factor / 2, 50, score, ha='center', va='center', size=20, color=color, bbox=bbox_props)
+
+    def format_axis(axis):
+        axis.axvline(max_over, color='k')
+        axis.set_xlim((0, 2 * max_over))
+        axis.axvline(max_over / 2.0, color='k', linestyle='--')
+        axis.axvline(max_over * 3.0 / 2.0, color='k', linestyle='--')
+        axis.set_xticks(np.arange(0, 2 * max_over + 1, 4.0 if max_over == 20 else 5.0))
+        if max_over == 50:
+            axis.set_xticklabels([str(x) for x in (0, 5, 10, 15, 20, 25, 30, 35, 40, 45,
                                              50, 5, 10, 15, 20, 25, 30, 35, 40, 45,
                                              50)])
-    else:
-        ax.set_xticklabels([str(x) for x in (0, 4, 8, 12, 16, 20, 4, 8, 12, 16, 20)])
+        else:
+            axis.set_xticklabels([str(x) for x in (0, 4, 8, 12, 16, 20, 4, 8, 12, 16, 20)])
+
+
+    sid.rename(columns={'overs_balls': 'overs'}, inplace=True)
+    fid.rename(columns={'overs_balls': 'overs'}, inplace=True)
+
+    fid['overs1'] = fid.overs
+    sid['overs1'] = sid.overs + max_over
+
+    fid['foW'] = fid.Wickets - fid.Wickets.shift(1)
+    sid['foW'] = sid.Wickets - sid.Wickets.shift(1)
+
+    team1 = md['1st_Innings'].values[0]
+    team2 = md['2nd_Innings'].values[0]
     venue = md.Venue.values[0].split(',')[-1]
     day = md.Match_Day.values[0].split('-')[0]
-    ax.set_title('{0} v {1} @ {2} on {3}({4})'.format(team1, team2,
-                                                      venue, day,
-                                                      'http://www.espncricinfo.com/series/18902/statistics/{0}'.format(md.Game_Id.values[0])))
-    ax = fig.add_subplot(212)
-    ax.step(fid.overs, fid.win_probability, color='r')
+
+    fig = plt.figure(figsize=(20, 10))
+
+    ax = fig.add_subplot(211)
+
+    worm_chart(fid, ax, 'r', '-')
+    predicted_score_chart(fid, ax, 'r', '--')
+    annotate_worm_chart(fid, ax)
+    box_score(fid, team1, ax, 'r', 1
+              )
+
     if len(sid) > 0:
-        ax.step(sid.overs1, sid.win_probability, color='r')
-    ax.axvline(max_over, color='k')
-    ax.axvline(max_over / 2.0, color='k', linestyle='--')
-    ax.axvline(max_over * 3.0 / 2.0, color='k', linestyle='--')
-    ax.axhline(0.5, color='k')
-    ax.set_xlim((0, 2 * max_over))
-    ax.set_xticks(np.arange(0, 2 * max_over + 1, 4.0 if max_over == 20 else 5.0))
-    if max_over == 50:
-        ax.set_xticklabels([str(x) for x in (0, 5, 10, 15, 20, 25, 30, 35, 40, 45,
-                                             50, 5, 10, 15, 20, 25, 30, 35, 40, 45,
-                                             50)])
-    else:
-        ax.set_xticklabels([str(x) for x in (0, 4, 8, 12, 16, 20, 4, 8, 12, 16, 20)])
-    ax.text(max_over, 0.25, '{0} Win Probability'.format(team1), ha='center', va='center', size=20, color='red', bbox=bbox_props)
+        worm_chart(sid, ax, 'b', '-')
+        plt.plt(sid.overs1, sid.Target, 'r', '--' )
+        annotate_worm_chart(sid, ax)
+        box_score(sid, team2, ax, 'b', 3)
+
+    format_axis(ax)
+    set_title(ax)
+    ax.set_ylim((0, fid.score_hi.max()))
+
+
+
+    ax = fig.add_subplot(212)
+
+    ax.plot(fid.overs1, fid.win_probability, color='r')
+    if len(sid) > 0:
+        ax.plot(sid.overs1, sid.win_probability, color='r')
+
+    format_axis(ax)
+    ax.axhline(0.5, color='k', ls='--')
+    ax.text(max_over, 0.25, '{0} Win Probability'.format(team1), ha='center', va='center',
+            size=20, color='red', bbox=bbox_props)
     ax.set_ylim((0, 1.0))
-    if live:
-        wp = fid.tail(1)['win_probability'].values[0]
-        if len(sid) > 0:
-            wp = sid.tail(1)['win_probability'].values[0]
-        ax.text(max_over, 0.1, box_score + '\n Win Probability:{0:.2f}'.format(wp * 100), ha='center',
-          va='center',
-          size=15,
-          color='red')
-    if location is not None:
-        from matplotlib.backends.backend_pdf import PdfPages
-        pdf = PdfPages(location)
-        pdf.savefig(fig)
-        pdf.close()
-        return
-    else:
-        return fig
+
+    return fig
