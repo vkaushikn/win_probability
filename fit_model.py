@@ -248,8 +248,10 @@ def fit(location: Text, max_over: int, sample_percentage: float=1.0) -> pd.DataF
     return pd.concat([df1, df2])
 
 
-def plot_game(fid: pd.DataFrame, sid: pd.DataFrame, md: pd.DataFrame, max_over: int) -> plt.Figure:
+def plot_game(first_innings: pd.DataFrame, second_innings: pd.DataFrame, md: pd.DataFrame, max_over: int) -> plt.Figure:
 
+    fid = first_innings.copy()
+    sid = second_innings.copy()
     bbox_props = dict(boxstyle='round', fc='w', ec='0.5', alpha=0.9)
 
     def set_title(axis):
@@ -278,7 +280,7 @@ def plot_game(fid: pd.DataFrame, sid: pd.DataFrame, md: pd.DataFrame, max_over: 
         score = '{2}: {0} - {1}'.format(int(idf.Runs.max()), int(idf.Wickets.max()), team)
         axis.text(max_over * factor / 2, 50, score, ha='center', va='center', size=20, color=color, bbox=bbox_props)
 
-    def format_axis(axis):
+    def format_xaxis(axis):
         axis.axvline(max_over, color='k')
         axis.set_xlim((0, 2 * max_over))
         axis.axvline(max_over / 2.0, color='k', linestyle='--')
@@ -291,6 +293,16 @@ def plot_game(fid: pd.DataFrame, sid: pd.DataFrame, md: pd.DataFrame, max_over: 
         else:
             axis.set_xticklabels([str(x) for x in (0, 4, 8, 12, 16, 20, 4, 8, 12, 16, 20)])
 
+
+    def format_yaxis(idf, axis):
+        if max_over == 20:
+            milestones =  [50, 100, 150, 200, 250]
+        else:
+            milestones = [50, 100, 150, 200, 250, 300, 350, 400]
+
+        axis.set_yticks(milestones)
+        axis.set_yticklabels([str(x) for x in milestones])
+        axis.set_ylim((0, idf.score_hi.max()))
 
     sid.rename(columns={'overs_balls': 'overs'}, inplace=True)
     fid.rename(columns={'overs_balls': 'overs'}, inplace=True)
@@ -313,31 +325,28 @@ def plot_game(fid: pd.DataFrame, sid: pd.DataFrame, md: pd.DataFrame, max_over: 
     worm_chart(fid, ax, 'r', '-')
     predicted_score_chart(fid, ax, 'r', '--')
     annotate_worm_chart(fid, ax)
-    box_score(fid, team1, ax, 'r', 1
-              )
+    box_score(fid, team1, ax, 'r', 1)
 
     if len(sid) > 0:
         worm_chart(sid, ax, 'b', '-')
-        plt.plt(sid.overs1, sid.Target, 'r', '--' )
+        plt.plot(sid.overs1, sid.Target, 'r', '--' )
         annotate_worm_chart(sid, ax)
         box_score(sid, team2, ax, 'b', 3)
 
-    format_axis(ax)
+    format_xaxis(ax)
+    format_yaxis(fid, ax)
     set_title(ax)
-    ax.set_ylim((0, fid.score_hi.max()))
 
+    ax2 = fig.add_subplot(212)
 
-
-    ax = fig.add_subplot(212)
-
-    ax.plot(fid.overs1, fid.win_probability, color='r')
+    ax2.plot(fid.overs1, fid.win_probability, color='r')
     if len(sid) > 0:
-        ax.plot(sid.overs1, sid.win_probability, color='r')
+        ax2.plot(sid.overs1, sid.win_probability, color='r')
 
-    format_axis(ax)
-    ax.axhline(0.5, color='k', ls='--')
-    ax.text(max_over, 0.25, '{0} Win Probability'.format(team1), ha='center', va='center',
+    format_xaxis(ax2)
+    ax2.axhline(0.5, color='k', ls='--')
+    ax2.text(max_over, 0.25, '{0} Win Probability'.format(team1), ha='center', va='center',
             size=20, color='red', bbox=bbox_props)
-    ax.set_ylim((0, 1.0))
+    ax2.set_ylim((0, 1.0))
 
     return fig
