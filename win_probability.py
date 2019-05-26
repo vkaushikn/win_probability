@@ -1,12 +1,13 @@
 """Fits the Logistic Regression Model to the data."""
 __author__ = 'kaushik'
 
-import pandas as pd
 from collections import namedtuple
+from functools import partial
 from glob import glob
 from itertools import chain
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import re
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from toolz import groupby, pipe
@@ -47,7 +48,7 @@ def validate_inputs(ball_by_ball_data: pd.DataFrame, innings: int, max_over: int
     assert 'Innings' in ball_by_ball_data.columns
 
 
-def get_features(state: NamedTuple, innings: int, max_over:int) -> Feature:
+def get_features(state, innings: int, max_over:int) -> Feature:
     """ Extracts the feature from the ball by ball data.
 
     :param state: A namedtuple containing one row of data from the ball by ball data
@@ -127,7 +128,7 @@ def process_innings_from_scorecard(ball_by_ball_data, innings):
     return inn
 
 
-def fit_model(features_and_targets: List[Feature_Target_Pair], innings: int) -> pd.DataFrame:
+def fit_model(features_and_targets: Iterator[Feature_Target_Pair], innings: int) -> pd.DataFrame:
     """Fits the model that predicts win probability.
 
     :param features_and_targets:  A List of the feature target pairs that consist of the data that we wish to model.
@@ -196,7 +197,7 @@ def fit_model(features_and_targets: List[Feature_Target_Pair], innings: int) -> 
         return fit_first_innings(features, targets, over_num) if innings == 1 else \
             fit_second_innings(features, targets, over_num)
 
-    def group_by_overs(fts: List[Feature_Target_Pair]) -> Iterator[Tuple[int, List[Feature_Target_Pair]]]:
+    def group_by_overs(fts: Iterator[Feature_Target_Pair]) -> Iterator[Tuple[int, List[Feature_Target_Pair]]]:
         grouped = groupby(lambda x: x[0].Over, fts)
         return grouped.items()
 
@@ -248,9 +249,9 @@ def predict_state(state: Feature, max_over:int, params_1: Dict[int, Parameter],
         log_wickets_param = params.wicket
         prediction = intercept + log_rr_param * log_rr + log_wickets_param * log_wickets
         win_probability = np.exp(prediction) / (1 + np.exp(prediction))
-        predicted_score = 'n/a'
-        predicted_score_lo = 'n/a'
-        predicted_score_hi = 'n/a'
+        predicted_score = -1
+        predicted_score_lo = -1
+        predicted_score_hi = -1
         return Prediction(2, state.Over, state.Ball, state.Runs, state.Target,
                           state.RunRate, state.Wickets,
                           1 - win_probability, predicted_score, predicted_score_lo, predicted_score_hi)
@@ -277,8 +278,8 @@ def predict_game(scorecard: pd.DataFrame, max_over: int,
 
     states_2 = create_feature_vector(scorecard, innings=2, max_over=max_over)
 
-    predictions_1 = [predict_state(state, max_over, params_1, params_2, 1) for state in states_1]
-    predictions_2 = [predict_state(state, max_over, params_1, params_2, 2) for state in states_2]
+    predictions_1 = [predict_state(state, max_over, params_1, params_2) for state in states_1]
+    predictions_2 = [predict_state(state, max_over, params_1, params_2) for state in states_2]
 
     df_1 = pd.DataFrame(predictions_1, columns= Prediction._fields)
     df_2 = pd.DataFrame(predictions_2, columns= Prediction._fields)
@@ -298,20 +299,28 @@ def fit(location: Text, max_over: int, sample_percentage: float=1.0) -> pd.DataF
     :param sample_percentage: (0, 1.0] --> Indicates the sampling level for fitting the model.
     :return: A dataframe with the fitted model.
     """
+
+    def match(string : Text, pattern: Text) -> Optional[Text]:
+        out = re.match(pattern, string)
+        if out:
+            return out.groups()[0]
+        return None
+
     def get_game_ids(_) -> Set[Text]:
         ball_by_ball_match_string= "{0}/data/ball_by_ball/([0-9]*).csv".format(location)
         match_summary_match_string = "{0}/data/match_summary/([0-9]*).csv".format(location)
 
         ball_by_ball_file_names = glob('{0}/data/ball_by_ball/*.csv'.format(location))
         match_summary_file_names = glob('{0}/data/match_summary/*.csv'.format(location))
-        game_ids_from_ball_by_ball_data = set(map(lambda x: re.match(ball_by_ball_match_string, x).groups()[0],
-                                                  ball_by_ball_file_names))
-        game_ids_from_match_summary_data = set(map(lambda x: re.match(match_summary_match_string, x).groups()[0],
-                                                   match_summary_file_names))
+
+        match_ball_by_ball = partial(match, pattern=ball_by_ball_match_string)
+        game_ids_from_ball_by_ball_data = pipe(ball_by_ball_file_names, map(match_ball_by_ball), filter(None), set)
+        match_match_summary = partial(match, pattern=match_summary_match_string)
+        game_ids_from_match_summary_data = pipe(match_summary_file_names, map(match_match_summary), filter(None), set)
 
         return game_ids_from_ball_by_ball_data.intersection(game_ids_from_match_summary_data)
 
-    def extract_features_for_game(game_id : Text) -> List[Optional[Feature_Target_Pair]]:
+    def extract_features_for_game(game_id : Text) -> List[List[Feature_Target_Pair]]:
         bd = pd.read_csv('{0}/data/ball_by_ball/{1}.csv'.format(location, game_id))
         md = pd.read_csv('{0}/data/match_summary/{1}.csv'.format(location, game_id))
         if md.Reduced_Over.values[0]:
