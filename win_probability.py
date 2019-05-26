@@ -17,7 +17,7 @@ import warnings
 pd.set_option('mode.chained_assignment', None)
 EPSILON = 0.01
 
-Feature = namedtuple("Feature", ["Over", "Ball", "Runs", "Target", "RunRate", "Wickets"])
+Feature = namedtuple("Feature", ["Innings", "Over", "Ball", "Runs", "Target", "RunRate", "Wickets"])
 Target = namedtuple("Target", ["Target"])
 Feature_Target_Pair = Tuple[Feature, Target]
 Parameter = namedtuple("Parameter", ["over", "intercept", 'run_rate', 'wicket', 'mu', 'sigma'])
@@ -25,7 +25,15 @@ Prediction = namedtuple("Prediction", ["Innings", "Over", "Ball", "Runs", "Targe
                                        "RunRate", "Wickets", "win_probability", "score", "score_lo", "score_hi"])
 
 
-def validate_inputs(ball_by_ball_data, innings, max_over, result):
+def validate_inputs(ball_by_ball_data: pd.DataFrame, innings: int, max_over: int, result: int) -> None:
+    """Validates the input data frame
+
+    :param ball_by_ball_data:  data frame with ball by ball data
+    :param innings:
+    :param max_over:
+    :param result:
+    :return:
+    """
     assert innings in [1, 2]
     assert max_over in [50, 20]
     assert result in [0, 1]
@@ -40,6 +48,13 @@ def validate_inputs(ball_by_ball_data, innings, max_over, result):
 
 
 def get_features(state: NamedTuple, innings: int, max_over:int) -> Feature:
+    """ Extracts the feature from the ball by ball data.
+
+    :param state: A namedtuple containing one row of data from the ball by ball data
+    :param innings: The innings for which we want to extract data
+    :param max_over: The maximum overs in the game (50 for ODI, 20 for T20)
+    :return: Feature's from the game state to be used in the modeling
+    """
     over = state.Over
     ball =  state.BallN
     run_rate = state.Run_Rate if innings == 1 else state.Required_Run_Rate
@@ -50,14 +65,20 @@ def get_features(state: NamedTuple, innings: int, max_over:int) -> Feature:
     if innings == 2 and over == max_over and ball == 6:
         run_rate = 36.0 if state.cumRuns < state.Target else run_rate
 
-    feature = Feature(over, ball, runs, target, run_rate, wickets)
+    feature = Feature(innings, over, ball, runs, target, run_rate, wickets)
     return feature
 
 
 def create_feature_vector(ball_by_ball_data: pd.DataFrame, innings: int, max_over: int) ->List[Feature]:
+    """Creates the feature vector for every ball in the game
 
+    :param ball_by_ball_data: A dataframe with the ball by ball data
+    :param innings:  The innings for which we want to extract the feature
+    :param max_over: The maximum overs in the game (50 for ODI, 20 for T20)
+    :return: A list of Feature (one for every ball in the innings)
+    """
     validate_inputs(ball_by_ball_data, innings, max_over, 1)
-    inn = get_innings_from_scorecard(ball_by_ball_data, innings)
+    inn = process_innings_from_scorecard(ball_by_ball_data, innings)
     if len(inn) == 0:
         warnings.warn('Empty data frame')
         return []
@@ -65,6 +86,14 @@ def create_feature_vector(ball_by_ball_data: pd.DataFrame, innings: int, max_ove
 
 def create_feature_and_target_vector(ball_by_ball_data: pd.DataFrame,
                           result: int, innings: int, max_over: int) ->List[Feature_Target_Pair]:
+    """Creates the feature and target vector for every over in the game.
+
+    :param ball_by_ball_data: A dataframe with the ball by ball data
+    :param result: 0 if the first innings team won, 1 if the second innings team won
+    :param innings: The innings for which we want to extract the feature
+    :param max_over: The maximum overs in the game (50 for ODI, 20 for T20)
+    :return: A list of Tuples. Each tuple consists of a feature and the target
+    """
 
     def get_features_and_target_from_state(state: NamedTuple):
         feature = get_features(state, innings, max_over)
@@ -73,7 +102,7 @@ def create_feature_and_target_vector(ball_by_ball_data: pd.DataFrame,
         return feature, target
 
     validate_inputs(ball_by_ball_data, innings, max_over, result)
-    inn = get_innings_from_scorecard(ball_by_ball_data, innings)
+    inn = process_innings_from_scorecard(ball_by_ball_data, innings)
     inn = inn[inn.OverCompleted]
     if len(inn) == 0:
         warnings.warn('Empty data frame')
@@ -81,7 +110,13 @@ def create_feature_and_target_vector(ball_by_ball_data: pd.DataFrame,
     return [get_features_and_target_from_state(state) for state in inn.itertuples()]
 
 
-def get_innings_from_scorecard(ball_by_ball_data, innings):
+def process_innings_from_scorecard(ball_by_ball_data, innings):
+    """Extracts data fo the relevant innings from the ball by ball data and adds over number, balls, total runs etc.
+
+    :param ball_by_ball_data: A data frame with the ball by ball data
+    :param innings: The innings for which we want to extract data
+    :return: The processed innings data frame
+    """
     inn = ball_by_ball_data[ball_by_ball_data.Innings == innings].copy(deep=True)
     inn['BallN'] = (inn.Ball.apply(lambda x: x - x // 1)) * 100
     inn['BallN'] = inn.BallN.apply(np.round)
@@ -93,21 +128,50 @@ def get_innings_from_scorecard(ball_by_ball_data, innings):
 
 
 def fit_model(features_and_targets: List[Feature_Target_Pair], innings: int) -> pd.DataFrame:
+    """Fits the model that predicts win probability.
+
+    :param features_and_targets:  A List of the feature target pairs that consist of the data that we wish to model.
+    :param innings: The innings that we wish to model.
+    :return: A data frame with the parameters of the model.
+    """
 
 
     def fit_model_for_over(pair: Tuple[int, List[Feature_Target_Pair]]) -> Parameter:
+        """Helper function that fits the model for data from a single over.
+        Note that this method uses variables from the outer scope.
+
+        :param pair: A tuple - first element is the over and the second element is the data
+        :return: Parameter fit for that over
+        """
 
         def feature_vector(feature_target_pair: Feature_Target_Pair) -> np.array:
+            """Converts the feature into a numpy array.
+
+            :param feature_target_pair:
+            :return: numpy array
+            """
             feature, _ = feature_target_pair
             log_run_rate = np.log(feature.RunRate + EPSILON)
             log_wicket = np.log(feature.Wickets + EPSILON)
             return np.array([log_run_rate, log_wicket])
 
         def target_vector(feature_target_pair: Feature_Target_Pair) -> np.array:
+            """Converts the target into a numpy array.
+
+            :param feature_target_pair:
+            :return: numpy array
+            """
             _, target = feature_target_pair
             return np.array(np.log(target.Target)) if innings == 1 else np.array(target.Target)
 
         def fit_first_innings(X: np.array, y:np.array, over:int) -> Parameter:
+            """Fits the linear regression model to predict the end of the innings run rate.
+
+            :param X: Matrix of regressors
+            :param y: Vector of observed values
+            :param over: Over for which we are predicting
+            :return: Parameters of that over
+            """
             lr = LinearRegression()
             lr.fit(X, y)
             predictions = lr.predict(X)
@@ -115,6 +179,13 @@ def fit_model(features_and_targets: List[Feature_Target_Pair], innings: int) -> 
             return Parameter(over, lr.intercept_, lr.coef_[0], lr.coef_[1], np.mean(errors), np.std(errors))
 
         def fit_second_innings(X: np.array, y:np.array, over: int) -> Parameter:
+            """Fits the logistic regression model to predict the winner at the end of second innings.
+
+            :param X: Matrix of regressors
+            :param y: ector of observed values
+            :param over: Over for which we are predicting
+            :return: Parameters of that over
+            """
             lr = LogisticRegression(solver='lbfgs')
             lr.fit(X, y)
             return Parameter(over, lr.intercept_[0], lr.coef_[0][0], lr.coef_[0][1], 0, 0)
@@ -134,10 +205,18 @@ def fit_model(features_and_targets: List[Feature_Target_Pair], innings: int) -> 
                                              'log_rr_param', 'log_wickets_param', 'mu', 'error_std'])
 
 def predict_state(state: Feature, max_over:int, params_1: Dict[int, Parameter],
-                  params_2: Dict[int, Parameter], innings: int) -> Prediction:
+                  params_2: Dict[int, Parameter]) -> Prediction:
+    """Predicts the win probability from the current state of the game
+
+    :param state: The state of the game
+    :param max_over:  The max overs in the game
+    :param params_1: 1st innings parameters
+    :param params_2: 2nd innings parameters
+    :return: The prediction for the given state
+    """
 
     over = state.Over
-
+    innings = state.Innings
     run_rate, wickets = state.RunRate, state.Wickets
     log_wickets = np.log(wickets + EPSILON)
     log_rr = np.log(run_rate + EPSILON)
@@ -177,7 +256,16 @@ def predict_state(state: Feature, max_over:int, params_1: Dict[int, Parameter],
                           1 - win_probability, predicted_score, predicted_score_lo, predicted_score_hi)
 
 
-def predict_game(scorecard: pd.DataFrame, max_over: int, params_1_df: pd.DataFrame, params_2_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def predict_game(scorecard: pd.DataFrame, max_over: int,
+                 params_1_df: pd.DataFrame, params_2_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Predicts the whole game from the given ball by ball data
+
+    :param scorecard: ball by ball data frame
+    :param max_over:  maximum overs in the game
+    :param params_1_df: parameters for the first innings
+    :param params_2_df: parameters for the second innings
+    :return: A tuple of dataframes consisting of predictions for each innings.
+    """
 
     params_1 = {row.overs: Parameter(row.overs, row.intercept, row.log_rr_param, row.log_wickets_param,
                                      row.mu, row.error_std) for row in params_1_df.itertuples()}
@@ -202,8 +290,14 @@ def predict_game(scorecard: pd.DataFrame, max_over: int, params_1_df: pd.DataFra
 
 
 def fit(location: Text, max_over: int, sample_percentage: float=1.0) -> pd.DataFrame:
-    """Coordinator function."""
+    """Coordinator function that fits the model to given data
 
+    :param location: Location of the folder in which the data is present. Note that this is the head of
+    the directory. The code will search for data in {location}/data/ball_by_ball and {location}/data/match_summary
+    :param max_over: 50 or 20 depending on the game for which we want to fit the model
+    :param sample_percentage: (0, 1.0] --> Indicates the sampling level for fitting the model.
+    :return: A dataframe with the fitted model.
+    """
     def get_game_ids(_) -> Set[Text]:
         ball_by_ball_match_string= "{0}/data/ball_by_ball/([0-9]*).csv".format(location)
         match_summary_match_string = "{0}/data/match_summary/([0-9]*).csv".format(location)
@@ -248,7 +342,16 @@ def fit(location: Text, max_over: int, sample_percentage: float=1.0) -> pd.DataF
     return pd.concat([df1, df2])
 
 
-def plot_game(first_innings: pd.DataFrame, second_innings: pd.DataFrame, md: pd.DataFrame, max_over: int) -> plt.Figure:
+def plot_game(first_innings: pd.DataFrame, second_innings: pd.DataFrame, match_summary: pd.DataFrame,
+              max_over: int) -> plt.Figure:
+    """Visualizes the progress of the game.
+
+    :param first_innings: Data frame with predictions for the 1st innings
+    :param second_innings: Data frame with predictions for the 2nd innings
+    :param match_summary: match summary data frame
+    :param max_over: max overs in the game
+    :return: A plt.Figure handle with the game visualized.
+    """
 
     fid = first_innings.copy()
     sid = second_innings.copy()
@@ -257,7 +360,7 @@ def plot_game(first_innings: pd.DataFrame, second_innings: pd.DataFrame, md: pd.
     def set_title(axis):
         axis.set_title('{0} v {1} @ {2} on {3}({4})'.
                  format(team1, team2, venue, day,
-                        'http://www.espncricinfo.com/series/18902/statistics/{0}'.format(md.Game_Id.values[0])))
+                        'http://www.espncricinfo.com/series/18902/statistics/{0}'.format(match_summary.Game_Id.values[0])))
 
     def worm_chart(idf, axis, color, ls):
         axis.plot(idf.overs1, idf.Runs, color=color, ls=ls)
@@ -313,10 +416,10 @@ def plot_game(first_innings: pd.DataFrame, second_innings: pd.DataFrame, md: pd.
     fid['foW'] = fid.Wickets - fid.Wickets.shift(1)
     sid['foW'] = sid.Wickets - sid.Wickets.shift(1)
 
-    team1 = md['1st_Innings'].values[0]
-    team2 = md['2nd_Innings'].values[0]
-    venue = md.Venue.values[0].split(',')[-1]
-    day = md.Match_Day.values[0].split('-')[0]
+    team1 = match_summary['1st_Innings'].values[0]
+    team2 = match_summary['2nd_Innings'].values[0]
+    venue = match_summary.Venue.values[0].split(',')[-1]
+    day = match_summary.Match_Day.values[0].split('-')[0]
 
     fig = plt.figure(figsize=(20, 10))
 
