@@ -4,7 +4,7 @@ __author__ = 'kaushik'
 from collections import namedtuple
 from functools import partial
 from glob import glob
-from itertools import chain
+from itertools import chain, product
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -349,6 +349,29 @@ def fit(location: Text, max_over: int, sample_percentage: float=1.0) -> pd.DataF
     df1['innings'] = 1
     df2['innings'] = 2
     return pd.concat([df1, df2])
+
+def win_probability_matrix_generator(params_1_df: pd.DataFrame,
+                                     params_2_df: pd.DataFrame, max_over: int) -> Iterator[Tuple[Prediction, Prediction]]:
+
+    # generate the win probability for the entire state-space
+    wickets = range(0, 11)
+    runs = range(0, 500)
+    overs = range(1, 51)
+
+    params_1 = {row.overs: Parameter(row.overs, row.intercept, row.log_rr_param, row.log_wickets_param,
+                                     row.mu, row.error_std) for row in params_1_df.itertuples()}
+
+    params_2 = {row.overs: Parameter(row.overs, row.intercept, row.log_rr_param, row.log_wickets_param,
+                                     row.mu, row.error_std) for row in params_2_df.itertuples()}
+    for (over, wicket, run) in product(overs, wickets, runs):
+        # over = 23, wicket = 4, {0...499}
+        feature_1 = Feature(1, over, 6, run, 0, run / over, wicket)
+        prediction_1 = predict_state(feature_1, max_over, params_1, params_2)
+        # will send 23,  wicket =4, Remaining Runs = {0...499}
+        feature_2 = Feature(2, over, 6, run, 0, run / (max_over + 1 - over), wicket)
+        prediction_2 = predict_state(feature_2, max_over, params_1, params_2)
+        yield prediction_1, prediction_2
+
 
 
 def plot_game(first_innings: pd.DataFrame, second_innings: pd.DataFrame, match_summary: pd.DataFrame,
