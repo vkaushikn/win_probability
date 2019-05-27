@@ -350,6 +350,7 @@ def fit(location: Text, max_over: int, sample_percentage: float=1.0) -> pd.DataF
     df2['innings'] = 2
     return pd.concat([df1, df2])
 
+
 def win_probability_matrix_generator(params_1_df: pd.DataFrame,
                                      params_2_df: pd.DataFrame, max_over: int) -> Iterator[Tuple[Prediction, Prediction]]:
 
