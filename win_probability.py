@@ -17,7 +17,7 @@ import warnings
 
 pd.set_option('mode.chained_assignment', None)
 EPSILON_RUNS = 0.01
-EPSILON_WICKETS = 1.0
+EPSILON_WICKETS = 0.01
 
 Feature = namedtuple("Feature", ["Innings", "Over", "Ball", "Runs", "Target", "RunRate", "Wickets"])
 Target = namedtuple("Target", ["Target"])
