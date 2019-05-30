@@ -293,6 +293,26 @@ def predict_game(scorecard: pd.DataFrame, max_over: int,
     return df_1, df_2
 
 
+def extract_features_for_game(game_id: Text, location: Text, sample_percentage: float, max_over: int) -> List[List[Feature_Target_Pair]]:
+    bd = pd.read_csv('{0}/data/ball_by_ball/{1}.csv'.format(location, game_id))
+    md = pd.read_csv('{0}/data/match_summary/{1}.csv'.format(location, game_id))
+    if md.Reduced_Over.values[0]:
+        return []
+    result = md.Winning_Innings.values[0] - 1
+
+    if result not in [0, 1]:
+        return []
+
+    if np.random.random() > sample_percentage:
+        return []
+    f1 = create_feature_and_target_vector(bd, result, 1, max_over)
+    f2 = create_feature_and_target_vector(bd, result, 2, max_over)
+
+    if f1 and f2:
+        return [f1, f2]
+    return []
+
+
 def fit(location: Text, max_over: int, sample_percentage: float = 1.0) -> pd.DataFrame:
     """Coordinator function that fits the model to given data
 
@@ -323,26 +343,8 @@ def fit(location: Text, max_over: int, sample_percentage: float = 1.0) -> pd.Dat
 
         return game_ids_from_ball_by_ball_data.intersection(game_ids_from_match_summary_data)
 
-    def extract_features_for_game(game_id: Text) -> List[List[Feature_Target_Pair]]:
-        bd = pd.read_csv('{0}/data/ball_by_ball/{1}.csv'.format(location, game_id))
-        md = pd.read_csv('{0}/data/match_summary/{1}.csv'.format(location, game_id))
-        if md.Reduced_Over.values[0]:
-            return []
-        result = md.Winning_Innings.values[0] - 1
-
-        if result not in [0, 1]:
-            return []
-
-        if np.random.random() > sample_percentage:
-            return []
-        f1 = create_feature_and_target_vector(bd, result, 1, max_over)
-        f2 = create_feature_and_target_vector(bd, result, 2, max_over)
-
-        if f1 and f2:
-            return [f1, f2]
-        return []
-
-    data = pipe(None, get_game_ids, map(extract_features_for_game), filter(None), list)
+    extract_features = partial(extract_features_for_game, location=location, sample_percentage=sample_percentage, max_over=max_over)
+    data = pipe(None, get_game_ids, map(extract_features), filter(None), list)
     first_innings = chain(*[x[0] for x in data])
     second_innings = chain(*[x[1] for x in data])
 
