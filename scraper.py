@@ -365,3 +365,28 @@ def download_ipl():
     _download(game_ids, 'IPL')
 
 
+def download_t20i():
+    data = BeautifulSoup(requests.get(
+         'http://stats.espncricinfo.com/ci/content/records/307852.html').text,
+                         features='lxml')
+    season_links = []
+    for datum in data.find_all('table', class_='recordsTable'):
+        links = datum.find_all('a')
+        for link in links:
+            season_links.append(link['href'])
+
+    game_ids = list()
+    for season_link in season_links:
+        data = BeautifulSoup(requests.get('http://stats.cricinfo.com' + season_link).text, features='lxml')
+        for datum in data.find_all('tr', class_='data1'):
+            data_1 = datum.find_all('a')
+            for datum_1 in data_1:
+                if 'T20I' not in datum_1.text:
+                    continue
+                link = datum_1['href']
+                game_id = link.split('/')[-1].split('.')[0]
+                if game_id in game_ids:
+                    warnings.warn('Repeated game_id: {0}'.format(game_id))
+                game_ids.append(int(game_id))
+    print('Downloading {0} games'.format(len(game_ids)))
+    _download(game_ids, 'T20I')

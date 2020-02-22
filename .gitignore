@@ -1,5 +1,6 @@
 IPL/
 ODIs/
+T20I/
 __pycache__/
 env/
 .DS_Store
@@ -9,3 +10,4 @@ env/
 webpage/
 notebooks/
 .mypy_cache/
+*.ipynb
