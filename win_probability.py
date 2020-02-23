@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import re
 from sklearn.linear_model import LinearRegression, LogisticRegression
-from toolz import groupby, pipe
+from toolz import groupby, pipe, concat
 from toolz.curried import map, filter
 from typing import List, Tuple, Text, Optional, Set, Iterator, Dict
 import warnings
@@ -100,7 +100,6 @@ def create_feature_and_target_vector(ball_by_ball_data: pd.DataFrame,
 
     def get_features_and_target_from_state(state):
         feature = get_features(state, innings, max_over)
-        # target = Target(inn.cumRuns.max() / max_over) if innings == 1 else Target(result)
         target = Target(inn.tail(1).Run_Rate.values[0]) if innings == 1 else Target(result)
         return feature, target
 
@@ -293,30 +292,10 @@ def predict_game(scorecard: pd.DataFrame, max_over: int,
     return df_1, df_2
 
 
-def extract_features_for_game(game_id: Text, location: Text, sample_percentage: float, max_over: int) -> List[List[Feature_Target_Pair]]:
-    bd = pd.read_csv('{0}/data/ball_by_ball/{1}.csv'.format(location, game_id))
-    md = pd.read_csv('{0}/data/match_summary/{1}.csv'.format(location, game_id))
-    if md.Reduced_Over.values[0]:
-        return []
-    result = md.Winning_Innings.values[0] - 1
-
-    if result not in [0, 1]:
-        return []
-
-    if np.random.random() > sample_percentage:
-        return []
-    f1 = create_feature_and_target_vector(bd, result, 1, max_over)
-    f2 = create_feature_and_target_vector(bd, result, 2, max_over)
-
-    if f1 and f2:
-        return [f1, f2]
-    return []
-
-
-def fit(location: Text, max_over: int, sample_percentage: float = 1.0) -> pd.DataFrame:
+def fit(locations: List[Text], max_over: int, sample_percentage: float = 1.0) -> pd.DataFrame:
     """Coordinator function that fits the model to given data
 
-    :param location: Location of the folder in which the data is present. Note that this is the head of
+    :param locations: Location of the folder in which the data is present. Note that this is the head of
     the directory. The code will search for data in {location}/data/ball_by_ball and {location}/data/match_summary
     :param max_over: 50 or 20 depending on the game for which we want to fit the model
     :param sample_percentage: (0, 1.0] --> Indicates the sampling level for fitting the model.
@@ -329,7 +308,13 @@ def fit(location: Text, max_over: int, sample_percentage: float = 1.0) -> pd.Dat
             return out.groups()[0]
         return None
 
-    def get_game_ids(_) -> Set[Text]:
+    def get_ball_by_ball_df(location, game_id):
+        return pd.read_csv('{0}/data/ball_by_ball/{1}.csv'.format(location, game_id))
+
+    def get_match_summary_df(location, game_id):
+        return pd.read_csv('{0}/data/match_summary/{1}.csv'.format(location, game_id))
+
+    def get_game_data(location) -> List[Tuple[pd.DataFrame, pd.DataFrame]]:
         ball_by_ball_match_string = "{0}/data/ball_by_ball/([0-9]*).csv".format(location)
         match_summary_match_string = "{0}/data/match_summary/([0-9]*).csv".format(location)
 
@@ -341,10 +326,29 @@ def fit(location: Text, max_over: int, sample_percentage: float = 1.0) -> pd.Dat
         match_match_summary = partial(match, pattern=match_summary_match_string)
         game_ids_from_match_summary_data = pipe(match_summary_file_names, map(match_match_summary), filter(None), set)
 
-        return game_ids_from_ball_by_ball_data.intersection(game_ids_from_match_summary_data)
+        game_ids = game_ids_from_ball_by_ball_data.intersection(game_ids_from_match_summary_data)
+        return [(get_ball_by_ball_df(location, game_id),
+                 get_match_summary_df(location, game_id)) for game_id in game_ids]
 
-    extract_features = partial(extract_features_for_game, location=location, sample_percentage=sample_percentage, max_over=max_over)
-    data = pipe(None, get_game_ids, map(extract_features), filter(None), list)
+    def extract_features(game_data: Tuple[pd.DataFrame, pd.DataFrame]) -> List[List[Feature_Target_Pair]]:
+        bd, md = game_data
+        if md.Reduced_Over.values[0]:
+            return []
+        result = md.Winning_Innings.values[0] - 1
+
+        if result not in [0, 1]:
+            return []
+
+        if np.random.random() > sample_percentage:
+            return []
+        f1 = create_feature_and_target_vector(bd, result, 1, max_over)
+        f2 = create_feature_and_target_vector(bd, result, 2, max_over)
+
+        if f1 and f2:
+            return [f1, f2]
+        return []
+
+    data = pipe(locations, map(get_game_data), concat, map(extract_features), filter(None), list)
     first_innings = chain(*[x[0] for x in data])
     second_innings = chain(*[x[1] for x in data])
 
@@ -358,12 +362,13 @@ def fit(location: Text, max_over: int, sample_percentage: float = 1.0) -> pd.Dat
 
 def win_probability_matrix_generator(params_1_df: pd.DataFrame,
                                      params_2_df: pd.DataFrame,
-                                     max_over: int) -> Iterator[Tuple[Prediction, Prediction]]:
+                                     max_over: int,
+                                     max_runs: int) -> Iterator[Tuple[Prediction, Prediction]]:
 
     # generate the win probability for the entire state-space
     wickets = range(0, 11)
-    runs = range(0, 500)
-    overs = range(1, 51)
+    runs = range(0, max_runs + 1)
+    overs = range(1, max_over + 1)
 
     params_1 = {row.overs: Parameter(row.overs, row.intercept, row.log_rr_param, row.log_wickets_param,
                                      row.mu, row.error_std) for row in params_1_df.itertuples()}
@@ -371,10 +376,9 @@ def win_probability_matrix_generator(params_1_df: pd.DataFrame,
     params_2 = {row.overs: Parameter(row.overs, row.intercept, row.log_rr_param, row.log_wickets_param,
                                      row.mu, row.error_std) for row in params_2_df.itertuples()}
     for (over, wicket, run) in product(overs, wickets, runs):
-        # over = 23, wicket = 4, {0...499}
         feature_1 = Feature(1, over, 6, run, 0, run / over, wicket)
         prediction_1 = predict_state(feature_1, max_over, params_1, params_2)
-        # will send 23,  wicket =4, Remaining Runs = {0...499}
+
         feature_2 = Feature(2, over, 6, run, 0, run / (max_over + 1 - over), wicket)
         prediction_2 = predict_state(feature_2, max_over, params_1, params_2)
         yield prediction_1, prediction_2

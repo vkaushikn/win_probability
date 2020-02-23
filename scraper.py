@@ -2,6 +2,7 @@
 __author__ = 'kaushik'
 
 from bs4 import BeautifulSoup
+import datetime
 from functools import partial
 from glob import glob
 import pandas as pd
@@ -265,7 +266,7 @@ def get_match_summary(game_id):
 def get_skip_over(game_ids, location):
     """Returns the set of games to download."""
 
-    def match(string : Text, pattern: Text) -> Optional[Text]:
+    def match(string: Text, pattern: Text) -> Optional[Text]:
         out = re.match(pattern, string)
         if out:
             return out.groups()[0]
@@ -312,11 +313,12 @@ def _download(game_ids, location):
     fetch_and_write(games_ids_to_fetch, location)
 
 
-def download_odi(season_start, season_end):
+def download_odi():
     """Fetches all the game Ids for ODIs.
     """
     game_ids = []
-    year = season_start
+    year = 2010
+    season_end = datetime.datetime.now().year
     while year <= season_end:
         season_link =(
             'http://stats.espncricinfo.com/ci/engine/records/team/match_results.html?class=2;id={0};type=year'.
@@ -390,3 +392,15 @@ def download_t20i():
                 game_ids.append(int(game_id))
     print('Downloading {0} games'.format(len(game_ids)))
     _download(game_ids, 'T20I')
+
+
+if __name__ == '__main__':
+    print('Downloading IPL...')
+    download_ipl()
+
+    print('Downloading T2OI...')
+    download_t20i()
+
+    print('Downloading ODI...')
+    download_odi()
+
