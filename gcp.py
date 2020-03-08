@@ -22,7 +22,7 @@ def get_blob(bucket_name: Text, blob_name: Text) -> storage.Blob:
 def upload_data_frame(bucket_name: Text, blob_name: Text, df: pd.DataFrame) -> None:
     """Uploads the data frame to the bucket."""
     blob = get_blob(bucket_name, blob_name)
-    data = io.StringIO(df.to_csv(index=False))
+    data = io.StringIO(df.to_csv(index=False, encoding='ISO-8859-1'))
     print('Uploading to blob:{0} in bucket: {1}'.format(blob_name, bucket_name))
     blob.upload_from_file(data)
 
@@ -31,4 +31,4 @@ def download_data_frame(bucket_name: Text, blob_name: Text) -> pd.DataFrame:
     blob = get_blob(bucket_name, blob_name)
     print('Downloading Blob:{0} in bucket: {1}'.format(blob_name, bucket_name))
     data = io.BytesIO(blob.download_as_string())
-    return pd.read_csv(data)
+    return pd.read_csv(data, encoding='ISO-8859-1')

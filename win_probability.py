@@ -123,7 +123,7 @@ def create_feature_and_target_vector(ball_by_ball_data: pd.DataFrame,
 
     validate_inputs(ball_by_ball_data, innings, max_over, result)
     inn = process_innings_from_scorecard(ball_by_ball_data, innings)
-    inn = inn[inn.OverCompleted]
+    inn = inn[inn.BallN == inn.BallN.min()]
     if len(inn) == 0:
         warnings.warn('Empty data frame')
         return []
@@ -239,7 +239,7 @@ def predict_state(state: Feature, max_over: int, params_1: Dict[int, Parameter],
         log_rr_param = params_predict.run_rate
         log_wickets_param = params_predict.wicket
         prediction = np.log(np.exp(prediction) + EPSILON_RUNS)
-        reply = intercept + log_rr_param * prediction + log_wickets_param * np.log(EPSILON_WICKETS)
+        reply = intercept + log_rr_param * prediction + log_wickets_param * np.log(10 + EPSILON_WICKETS)
         win_probability = np.exp(reply) / (1 + np.exp(reply))
         predicted_score = int(np.exp(prediction) * max_over)
         predicted_score_lo = int(np.exp(prediction - std) * max_over)
@@ -285,8 +285,7 @@ def fit(ball_by_ball_data: pd.DataFrame, match_summary_data: pd.DataFrame, max_o
             return [f1, f2]
         return []
 
-    assert len(match_summary_data[match_summary_data.Reduced_Over]) == len(match_summary_data),\
-        "Do not provide data for rain affected matches"
+    match_summary_data = match_summary_data[~match_summary_data.Reduced_Over]
     bbb_game_ids = set(ball_by_ball_data.Game_Id.unique())
     ms_game_ids = set(match_summary_data.Game_Id.unique())
     game_ids = bbb_game_ids.intersection(ms_game_ids)
@@ -307,10 +306,17 @@ def win_probability_matrix_generator(params_1_df: pd.DataFrame,
                                      max_over: int,
                                      max_runs: int) -> Iterator[Tuple[Prediction, Prediction]]:
 
+    def average(metric1, metric2):
+        wts_a = [1.0, 0.75, 0.5, 0.5, 0.25, 0.0]
+        wts_b = [0.0, 0.25, 0.5, 0.5, 0.75, 1.0]
+        return metric1 * wts_a[ball - 1] + metric2 * wts_b[ball - 1]
+
     # generate the win probability for the entire state-space
     wickets = range(0, 11)
     runs = range(0, max_runs + 1)
     overs = range(1, max_over + 1)
+
+    # we want to do a weighted average of the predictions
 
     params_1 = {row.overs: Parameter(row.overs, row.intercept, row.log_rr_param, row.log_wickets_param,
                                      row.mu, row.error_std) for row in params_1_df.itertuples()}
@@ -318,12 +324,64 @@ def win_probability_matrix_generator(params_1_df: pd.DataFrame,
     params_2 = {row.overs: Parameter(row.overs, row.intercept, row.log_rr_param, row.log_wickets_param,
                                      row.mu, row.error_std) for row in params_2_df.itertuples()}
     for (over, wicket, run) in product(overs, wickets, runs):
-        feature_1 = Feature(1, over, 6, run, 0, run / over, wicket)
-        prediction_1 = predict_state(feature_1, max_over, params_1, params_2)
+        for ball in range(1, 7):
+            feature_1a = Feature(1, over, ball, run, 0, run / over, wicket)
+            prediction_1a = predict_state(feature_1a, max_over, params_1, params_2)
+            if over < max_over:
+                feature_1b = Feature(1, over + 1, ball, run, 0, run / (over + 1), wicket)
+                prediction_1b = predict_state(feature_1b, max_over, params_1, params_2)
 
-        feature_2 = Feature(2, over, 6, run, 0, run / (max_over + 1 - over), wicket)
-        prediction_2 = predict_state(feature_2, max_over, params_1, params_2)
-        yield prediction_1, prediction_2
+                wp_1a = prediction_1a.win_probability
+                score_1a = prediction_1a.score
+                score_lo_1a = prediction_1a.score_lo
+                score_hi_1a = prediction_1a.score_hi
+
+                wp_1b = prediction_1b.win_probability
+                score_1b = prediction_1b.score
+                score_lo_1b = prediction_1b.score_lo
+                score_hi_1b = prediction_1b.score_hi
+
+                score = average(score_1a, score_1b)
+                score_lo = average(score_lo_1a, score_lo_1b)
+                score_hi = average(score_hi_1a, score_hi_1b)
+                wp = average(wp_1a, wp_1b)
+
+                prediction_1 = Prediction(prediction_1a.Innings,
+                                          prediction_1a.Over,
+                                          prediction_1a.Ball,
+                                          prediction_1a.Runs,
+                                          prediction_1a.Target,
+                                          prediction_1a.RunRate,
+                                          prediction_1a.Wickets,
+                                          wp, score, score_lo, score_hi)
+            else:
+                prediction_1 = prediction_1a
+
+            feature_2a = Feature(2, over, ball, run, 0, run / (max_over + 1 - over), wicket)
+            prediction_2a = predict_state(feature_2a, max_over, params_1, params_2)
+
+            if over < max_over:
+                feature_2b = Feature(2, over + 1, ball, run, 0, run / (max_over + 2 - over), wicket)
+                prediction_2b = predict_state(feature_2b, max_over, params_1, params_2)
+
+                wp_2a = prediction_2a.win_probability
+                wp_2b = prediction_2b.win_probability
+                wp = average(wp_2a, wp_2b)
+
+                prediction_2 = Prediction(prediction_2a.Innings,
+                                          prediction_2a.Over,
+                                          prediction_2a.Ball,
+                                          prediction_2a.Runs,
+                                          prediction_2a.Target,
+                                          prediction_2a.RunRate,
+                                          prediction_2a.Wickets,
+                                          wp,
+                                          prediction_2a.score,
+                                          prediction_2a.score_lo,
+                                          prediction_2a.score_hi)
+            else:
+                prediction_2 = prediction_2a
+            yield prediction_1, prediction_2
 
 
 # Predictions & Figures
