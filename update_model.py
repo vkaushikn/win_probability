@@ -6,6 +6,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 import numpy as np
 import os
 import pandas as pd
+import scraper
 from typing import Text, List, Tuple
 import win_probability
 
@@ -51,6 +52,10 @@ def update_model(game_type: Text) -> None:
     """Trains the model and uploads the data to GCP."""
     assert game_type in ['ODI', 'T20']
     if game_type == 'T20':
+        print('Updating T20I games...')
+        scraper.update_t20i()
+        print('Updating IPL games...')
+        scraper.update_ipl()
         # want to combine International and IPL
         # TODO: Later get all the leagues data
         t20_bbb, t20_ms = get_data_frame('T20I')
@@ -61,6 +66,8 @@ def update_model(game_type: Text) -> None:
         match_summary = match_summary[~match_summary.Reduced_Over]
         ball_by_ball = ball_by_ball[ball_by_ball.Game_Id.isin(match_summary.Game_Id.unique())]
     else:
+        print('Updating ODI games...')
+        scraper.update_odi()
         bbb, ms = get_data_frame('ODI')
         ball_by_ball, match_summary = filter_test_teams(bbb, ms)
     game_ids = list(match_summary.Game_Id.unique())
@@ -135,10 +142,9 @@ def update_model(game_type: Text) -> None:
     os.remove("second_innings_matrix.txt")
 
 
+if __name__ == '__main__':
+    print('Updating the T20 model...')
+    update_model('T20')
 
-
-
-
-
-
-
+    print('Updating the ODI model...')
+    update_model('ODI')
