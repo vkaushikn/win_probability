@@ -3,14 +3,9 @@ __author__ = 'kaushik'
 
 from bs4 import BeautifulSoup
 import datetime
-from functools import partial
-from glob import glob
+import gcp
 import pandas as pd
-import re
 import requests
-from toolz import pipe
-from toolz.curried import map, filter
-from typing import Text, Optional
 import warnings
 
 CRICINFO = 'http://site.web.api.espn.com/apis/site/v2/sports/cricket/8676/'
@@ -262,63 +257,57 @@ def get_match_summary(game_id):
     return match_details
 
 
-# TODO(kaushik) Refactor matching into its own method - shared elsewhere
-def get_skip_over(game_ids, location):
+def get_skip_over(game_ids, bbb_data, ms_data):
     """Returns the set of games to download."""
-
-    def match(string: Text, pattern: Text) -> Optional[Text]:
-        out = re.match(pattern, string)
-        if out:
-            return out.groups()[0]
-        return None
-
-    ball_by_ball_match_string = "{0}/data/ball_by_ball/([0-9]*).csv".format(location)
-    match_summary_match_string = "{0}/data/match_summary/([0-9]*).csv".format(location)
-
-    ball_by_ball_file_names = glob('{0}/data/ball_by_ball/*.csv'.format(location))
-    match_summary_file_names = glob('{0}/data/match_summary/*.csv'.format(location))
-
-    match_ball_by_ball = partial(match, pattern=ball_by_ball_match_string)
-    game_ids_from_ball_by_ball_data = pipe(ball_by_ball_file_names, map(match_ball_by_ball), filter(None), set)
-
-    match_match_summary = partial(match, pattern=match_summary_match_string)
-    game_ids_from_match_summary_data = pipe(match_summary_file_names, map(match_match_summary), filter(None), set)
-
+    game_ids_from_ball_by_ball_data = set(bbb_data.Game_Id.unique())
+    game_ids_from_match_summary_data = set(ms_data.Game_Id.unique())
     finished_ids = game_ids_from_ball_by_ball_data.intersection(game_ids_from_match_summary_data)
     skip_over_set = set([int(ids) for ids in finished_ids])
     game_ids_set = set(game_ids)
     ret = game_ids_set - skip_over_set
-    warnings.warn('Will fetch: {0} games'.format(len(ret)))
+    print('Will fetch: {0} games'.format(len(ret)))
     return ret
 
 
-def fetch_and_write(game_ids, location, print_frequency=25):
+def fetch_from_cricinfo(game_ids, print_frequency=25):
     total_games_to_fetch = len(game_ids)
+    ball_by_balls = []
+    match_summaries = []
     for i, game_id in enumerate(game_ids):
         if i % print_frequency == 0:
             print('Fetching {0} of {1}'.format(i, total_games_to_fetch))
         try:
             bbb, md = get_match_details(game_id)
         except Exception:
-            warnings.warn('Failed to fetch:{0}'.format(game_id))
+            print('Failed to fetch:{0}'.format(game_id))
         else:
             bbb_df = pd.DataFrame([b.to_row() for b in bbb], columns=BallByBall.get_header())
             md_df = pd.DataFrame([md.to_row()], columns=MatchDetails.get_header())
-            bbb_df.to_csv('{0}/data/ball_by_ball/{1}.csv'.format(location, game_id), index=None)
-            md_df.to_csv('{0}/data/match_summary/{1}.csv'.format(location, game_id), index=None)
+            ball_by_balls.append(bbb_df)
+            match_summaries.append(md_df)
+    return pd.concat(ball_by_balls), pd.concat(match_summaries)
 
 
-def _download(game_ids, location):
-    games_ids_to_fetch = get_skip_over(game_ids, location)
-    fetch_and_write(games_ids_to_fetch, location)
+def _update(game_ids, location):
+    ball_by_ball_old = gcp.download_data_frame('ball-by-ball', location)
+    match_summary_old = gcp.download_data_frame('match-summary', location)
+
+    games_ids_to_fetch = get_skip_over(game_ids, ball_by_ball_old, match_summary_old)
+    ball_by_ball_new, match_summary_new = fetch_from_cricinfo(games_ids_to_fetch)
+    ball_by_ball = ball_by_ball_old.append(ball_by_ball_new)
+    match_summary = match_summary_old.append(match_summary_new)
+
+    gcp.upload_data_frame('ball-by-ball', location, ball_by_ball)
+    gcp.upload_data_frame('match-summary', location, match_summary)
 
 
-def download_odi():
+def update_odi():
     """Fetches all the game Ids for ODIs.
     """
     game_ids = []
     year = 2010
     season_end = datetime.datetime.now().year
+    print('Crawling game ids...')
     while year <= season_end:
         season_link =(
             'http://stats.espncricinfo.com/ci/engine/records/team/match_results.html?class=2;id={0};type=year'.
@@ -337,14 +326,15 @@ def download_odi():
                 game_ids.append(int(game_id))
 
         year += 1
-    _download(game_ids, 'ODIs')
+    _update(game_ids, 'ODI')
 
 
-def download_ipl():
+def update_ipl():
     data = BeautifulSoup(requests.get(
         'http://stats.espncricinfo.com/ci/engine/records/team/match_results_season.html?id=117;type=trophy').text,
                          features='lxml')
     season_links = []
+    print('Crawling game ids...')
     for datum in data.find_all('table', class_='recordsTable'):
         links = datum.find_all('a')
         for link in links:
@@ -364,14 +354,15 @@ def download_ipl():
                     warnings.warn('Repeated game_id: {0}'.format(game_id))
                 game_ids.append(int(game_id))
 
-    _download(game_ids, 'IPL')
+    _update(game_ids, 'IPL')
 
 
-def download_t20i():
+def update_t20i():
     data = BeautifulSoup(requests.get(
          'http://stats.espncricinfo.com/ci/content/records/307852.html').text,
                          features='lxml')
     season_links = []
+    print('Crawling game ids...')
     for datum in data.find_all('table', class_='recordsTable'):
         links = datum.find_all('a')
         for link in links:
@@ -390,17 +381,16 @@ def download_t20i():
                 if game_id in game_ids:
                     warnings.warn('Repeated game_id: {0}'.format(game_id))
                 game_ids.append(int(game_id))
-    print('Downloading {0} games'.format(len(game_ids)))
-    _download(game_ids, 'T20I')
+    _update(game_ids, 'T20I')
 
 
 if __name__ == '__main__':
-    print('Downloading IPL...')
-    download_ipl()
+    print('Updating IPL...')
+    update_ipl()
 
-    print('Downloading T2OI...')
-    download_t20i()
+    print('Updating T2OI...')
+    update_t20i()
 
-    print('Downloading ODI...')
-    download_odi()
+    print('Updating ODI...')
+    update_odi()
 
