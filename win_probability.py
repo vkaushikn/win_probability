@@ -9,7 +9,7 @@ import pandas as pd
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from toolz import groupby, pipe
 from toolz.curried import map, filter
-from typing import List, Tuple, Iterator, Dict
+from typing import List, Tuple, Iterator, Dict, Text
 import warnings
 
 pd.set_option('mode.chained_assignment', None)
@@ -118,11 +118,13 @@ def create_feature_and_target_vector(ball_by_ball_data: pd.DataFrame,
 
     def get_features_and_target_from_state(state):
         feature = get_features(state, innings, max_over)
-        target = Target(inn.tail(1).Run_Rate.values[0]) if innings == 1 else Target(result)
+        target = Target(first_innings_target) if innings == 1 else Target(second_innings_target)
         return feature, target
 
     validate_inputs(ball_by_ball_data, innings, max_over, result)
     inn = process_innings_from_scorecard(ball_by_ball_data, innings)
+    second_innings_target = result
+    first_innings_target = inn.tail(1).Run_Rate.values[0]
     inn = inn[inn.BallN == inn.BallN.min()]
     if len(inn) == 0:
         warnings.warn('Empty data frame')
@@ -325,10 +327,11 @@ def win_probability_matrix_generator(params_1_df: pd.DataFrame,
                                      row.mu, row.error_std) for row in params_2_df.itertuples()}
     for (over, wicket, run) in product(overs, wickets, runs):
         for ball in range(1, 7):
-            feature_1a = Feature(1, over, ball, run, 0, run / over, wicket)
+            run_rate = run / (((over - 1) * 6 + ball) / 6)
+            feature_1a = Feature(1, over, ball, run, 0, run_rate, wicket)
             prediction_1a = predict_state(feature_1a, max_over, params_1, params_2)
             if over < max_over:
-                feature_1b = Feature(1, over + 1, ball, run, 0, run / (over + 1), wicket)
+                feature_1b = Feature(1, over + 1, ball, run, 0, run_rate, wicket)
                 prediction_1b = predict_state(feature_1b, max_over, params_1, params_2)
 
                 wp_1a = prediction_1a.win_probability
@@ -357,11 +360,15 @@ def win_probability_matrix_generator(params_1_df: pd.DataFrame,
             else:
                 prediction_1 = prediction_1a
 
-            feature_2a = Feature(2, over, ball, run, 0, run / (max_over + 1 - over), wicket)
+            # Now run is the remaining runs to be scored.
+            fractional_over = ((over - 1) * 6 + ball) / 6
+            remaining_fractional_over = max_over - fractional_over
+            required_run_rate = run / remaining_fractional_over if remaining_fractional_over > 0 else (0 if run == 0 else 36)
+            feature_2a = Feature(2, over, ball, run, 0, required_run_rate, wicket)
             prediction_2a = predict_state(feature_2a, max_over, params_1, params_2)
 
             if over < max_over:
-                feature_2b = Feature(2, over + 1, ball, run, 0, run / (max_over + 2 - over), wicket)
+                feature_2b = Feature(2, over + 1, ball, run, 0, run / remaining_fractional_over, wicket)
                 prediction_2b = predict_state(feature_2b, max_over, params_1, params_2)
 
                 wp_2a = prediction_2a.win_probability
@@ -382,6 +389,31 @@ def win_probability_matrix_generator(params_1_df: pd.DataFrame,
             else:
                 prediction_2 = prediction_2a
             yield prediction_1, prediction_2
+
+
+def win_probability_matrix_generator_cricmetric_format(prediction: Tuple[Prediction, Prediction], is_odi: bool) -> Tuple[Text, Text]:
+    """Returns the text form for the Cricmetric format.
+
+    1st Innings: Balls, Wickets, Runs, WP, MID, LO, HI
+    2nd Innings: Remaining_Balls, Remaining_Wickets, Remaining_Runs, WP
+
+    :param prediction: The predictions for the given state
+    :param is_odi: True if we are predicting ODI
+    :return: tab separated text for each innings
+    """
+
+    def format(pred):
+        innings, over, ball, runs, _, _, wickets, wp, mid, lo, hi = pred
+        total_balls = (over - 1) * 6 + ball
+        if innings == 2:
+            remaining_runs = runs
+            remaining_wickets = 10 - wickets
+            remaining_balls = (300 if is_odi else 120) - total_balls
+            return "\t".join(map(str, [remaining_balls, remaining_wickets, remaining_runs, wp, mid, lo, hi]))
+        return "\t".join(map(str, [total_balls, wickets, runs, wp, mid, lo, hi]))
+
+    prediction_1, prediction_2 = prediction
+    return format(prediction_1), format(prediction_2)
 
 
 # Predictions & Figures
