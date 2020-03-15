@@ -1,3 +1,4 @@
+#!/Users/kaushik/opt/anaconda3/bin/python
 """Updates the model and writes the parameter files to GCP."""
 import io
 import gcp
@@ -102,14 +103,15 @@ def update_model(game_type: Text) -> None:
     matrix_1 = open('first_innings_matrix.txt', 'w')
     matrix_2 = open('second_innings_matrix.txt', 'w')
     max_runs = 500 if game_type == 'ODI' else 300
-    for pred_1, pred_2 in win_probability.win_probability_matrix_generator(params_1,
-                                                                           params_2,
-                                                                           max_over,
-                                                                           max_runs):
-        matrix_1.write("\t".join(map(str, pred_1)))
+    for prediction in win_probability.win_probability_matrix_generator(params_1,
+                                                                       params_2,
+                                                                       max_over,
+                                                                       max_runs):
+        text_1, text_2 = win_probability.win_probability_matrix_generator_cricmetric_format(prediction, game_type == 'ODI')
+        matrix_1.write(text_1)
         matrix_1.write("\n")
 
-        matrix_2.write("\t".join(map(str, pred_2)))
+        matrix_2.write(text_2)
         matrix_2.write("\n")
     matrix_1.close()
     matrix_2.close()
