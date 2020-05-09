@@ -358,7 +358,35 @@ def win_probability_matrix_generator(params_1_df: pd.DataFrame,
                                           prediction_1a.Wickets,
                                           wp, score, score_lo, score_hi)
             else:
-                prediction_1 = prediction_1a
+                score_1a = prediction_1a.score
+                score_lo_1a = prediction_1a.score_lo
+                score_hi_1a = prediction_1a.score_hi
+
+                # This is the score we would expect if we had 6 more balls.
+                delta_score = score_1a - run
+                delta_score_lo = score_lo_1a - run
+                delta_score_hi = score_hi_1a - run
+
+                score = int(run + (6 - ball) / 6.0 * delta_score)
+                score_hi = int(run + (6 - ball) / 6.0 * delta_score_hi)
+                score_lo = int(run + (6 - ball) / 6.0 * delta_score_lo)
+
+                # obtain the wp for the predicted score now.
+                params_predict = params_2[1]
+                intercept = params_predict.intercept
+                log_rr_param = params_predict.run_rate
+                log_wickets_param = params_predict.wicket
+                prediction = np.log(score / max_over + EPSILON_RUNS)
+                reply = intercept + log_rr_param * prediction + log_wickets_param * np.log(10 + EPSILON_WICKETS)
+                wp = 1 - np.exp(reply) / (1 + np.exp(reply))
+                prediction_1 = Prediction(prediction_1a.Innings,
+                                          prediction_1a.Over,
+                                          prediction_1a.Ball,
+                                          prediction_1a.Runs,
+                                          prediction_1a.Target,
+                                          prediction_1a.RunRate,
+                                          prediction_1a.Wickets,
+                                          wp, score, score_lo, score_hi)
 
             # Now run is the remaining runs to be scored.
             fractional_over = ((over - 1) * 6 + ball) / 6
@@ -387,6 +415,8 @@ def win_probability_matrix_generator(params_1_df: pd.DataFrame,
                                           prediction_2a.score_lo,
                                           prediction_2a.score_hi)
             else:
+                # the actual WP might be slightly higher because score 4 of 2 balls (RR=12) is probably easier than
+                # scoring 12 of 6 balls.
                 prediction_2 = prediction_2a
             yield prediction_1, prediction_2
 
@@ -409,7 +439,8 @@ def win_probability_matrix_generator_cricmetric_format(prediction: Tuple[Predict
             remaining_runs = runs
             remaining_wickets = 10 - wickets
             remaining_balls = (300 if is_odi else 120) - total_balls
-            return "\t".join(map(str, [remaining_balls, remaining_wickets, remaining_runs, wp, mid, lo, hi]))
+            wp_2nd_innings = 1 - wp
+            return "\t".join(map(str, [remaining_balls, remaining_wickets, remaining_runs, wp_2nd_innings, mid, lo, hi]))
         return "\t".join(map(str, [total_balls, wickets, runs, wp, mid, lo, hi]))
 
     prediction_1, prediction_2 = prediction
