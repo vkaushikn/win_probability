@@ -15,5 +15,6 @@ notebooks/
 *.ipynb
 env/
 .if_i_forget
-.log
+*.log
 .vscode
+*.csv
