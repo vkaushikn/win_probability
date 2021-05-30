@@ -1,6 +1,8 @@
 IPL/
-ODIs/
+ODI/
 T20I/
+T20/
+TEST/
 __pycache__/
 env/
 .DS_Store
@@ -11,3 +13,7 @@ webpage/
 notebooks/
 .mypy_cache/
 *.ipynb
+env/
+.if_i_forget
+.log
+.vscode
