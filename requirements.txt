@@ -1,0 +1,12 @@
+#### Requirements without version specifiers
+beautifulsoup4
+requests
+pandas
+numpy
+toolz
+scikit-learn[alldeps]
+google-cloud-storage
+ipykernel
+aiohttp
+nest_asyncio
+aiofiles
