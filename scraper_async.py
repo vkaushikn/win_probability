@@ -168,10 +168,12 @@ async def process_years(years: List[int], game_format: int) -> List[Tuple[int, b
             logging.debug(f'Creating file {gt}/{yr}/ball_by_ball.csv')
             with open(f'{gt}/{yr}/ball_by_ball.csv', "w") as f:
                 f.write(",".join(BallByBall.get_header()))
+                f.write("\n")
         if not pathlib.Path(f'{gt}/{yr}/match_summary.csv').exists():
             logging.debug(f'Creating file {gt}/{yr}/match_summary.csv')
             with open(f'{gt}/{yr}/match_summary.csv', "w") as f:
-                f.write(",".join(MatchDetails.get_header())) 
+                f.write(",".join(MatchDetails.get_header()))
+                f.write("\n") 
     
     def get_ignore(gt, yr):
         """Gets the match ids to ignore in the year."""

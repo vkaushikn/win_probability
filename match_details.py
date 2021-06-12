@@ -14,6 +14,8 @@ class MatchDetails(object):
         self.toss_team, self.toss_choice = MatchDetails._set_toss_team_and_choice(data['notes'])
 
         self.venue = data['gameInfo']['venue']['fullName']
+        self.city = data['gameInfo']['venue']['address']['city']
+        self.country = data['gameInfo']['venue']['address']['country']
         self.reduced_over_game = data['header']['competitions'][0]['reducedOvers']
         self.neutral_site_game = data['header']['competitions'][0]['neutralSite']
 
@@ -22,7 +24,9 @@ class MatchDetails(object):
 
     def to_row(self):
         return [self.game_id, self.first_bat_team, self.second_bat_team, self.toss_team, self.toss_choice,
-                self.winning_innings, self.reduced_over_game, self.neutral_site_game, self.venue, self.day_night,
+                self.winning_innings, self.reduced_over_game, self.neutral_site_game,
+                self.venue, self.city, self.country,
+                self.day_night,
                 self.matchday]
 
     @staticmethod
@@ -107,4 +111,5 @@ class MatchDetails(object):
     @staticmethod
     def get_header():
         return ['Game_Id', '1st_Innings', '2nd_Innings', 'Toss', 'Toss_Choice', 'Winning_Innings', 'Reduced_Over',
-                'Neutral_Site', 'Venue', 'Day_Night', 'Match_Day']
+                'Neutral_Site', 'Venue', 'City', 'Country',
+                'Day_Night', 'Match_Day']

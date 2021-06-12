@@ -6,6 +6,9 @@ class BallByBall(object):
     """
     def __init__(self, game_id: int, data):
         self.game_id = game_id
+        if 'name' not in data['team']:
+            print(game_id)
+        self.batting_team = data['team'].get('name', 'n/a')
         self.over_number = data['over']['number']
         self.ball_number = data['over']['unique']
         self.batsman = data['batsman']['athlete'].get('fullName', '')
@@ -33,9 +36,10 @@ class BallByBall(object):
         self.required_run_rate = data['innings'].get('requiredRunRate', 0.0)
         self.day = data['innings'].get('day', 0.0)
         self.session = data['innings'].get('session', 0.0)
+ 
 
     def to_row(self):
-        return [self.game_id, self.innings, self.over_number, self.ball_number, self.runs, self.fours, self.sixes,
+        return [self.game_id, self.innings, self.batting_team, self.over_number, self.ball_number, self.runs, self.fours, self.sixes,
                 self.wicket, self.batsman_score, self.other_batsman_score, self.batsman, self.other_batsman,
                 self.bowler, self.completed, self.ball_limit, self.remaining_balls, self.target, self.runrate,
                 self.extras, self.byes, self.legByes, self.wide, self.noBall, self.remaining_runs,
@@ -43,7 +47,7 @@ class BallByBall(object):
 
     @staticmethod
     def get_header():
-        return ['Game_Id', 'Innings', 'Over', 'Ball', 'Runs', 'Fours', 'Sixes', 'Wicket', 'Batsman_Score',
+        return ['Game_Id', 'Innings', 'BattingTeam', 'Over', 'Ball', 'Runs', 'Fours', 'Sixes', 'Wicket', 'Batsman_Score',
                 'Other_Batsman_Score', 'Batsman', 'Other_Batsman', 'Bowler', 'OverCompleted', 'Ball_Limit',
                 'Remaining_Balls', 'Target', 'Run_Rate', 'Extras', 'Byes', 'LegByes', 'Wide', 'NoBall',
                 'Remaining_Runs', 'Required_Run_Rate', 'Day', 'Session']
