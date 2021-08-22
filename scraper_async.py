@@ -60,21 +60,27 @@ def create_summary_link(match: int) -> Text:
     link_stub = CRICINFO + 'summary?contentorigin=espn&event={0}&lang=en&region=us&section=cricinfo'
     return link_stub.format(match)
 
-
+async def fetch_with_retry(link, session, max_retry):
+    retry_count = 1
+    while retry_count <= max_retry:
+        response = await session.get(link)
+        if response.status < 400:
+            break
+        retry_count += 1
+    response.raise_for_status()
+    return response
 
 async def get_page_count(game_id: int, innings: int, session: aiohttp.ClientSession) -> int:
     """Returns the number of pages in the commentary."""
     link = create_ball_by_ball_link(game_id, innings=innings, page=1)
-    response = await session.get(link)
-    response.raise_for_status()
+    response = await fetch_with_retry(link, session, 500)
     data = (await response.json())['commentary']
     return data['pageCount']
 
 async def get_commentary_from_page(game_id: int, innings: int, session: aiohttp.ClientSession, page: int) -> List[BallByBall]:
     """Returns the ball by ball commentary information in the page."""
     link = create_ball_by_ball_link(game_id, innings=innings, page=page)
-    response = await session.get(link)
-    response.raise_for_status()
+    response = await fetch_with_retry(link, session, 500)
     data = (await response.json())['commentary']
     return [BallByBall(game_id, item) for item in data['items']]
 
@@ -99,8 +105,7 @@ async def get_ball_by_ball(game_id: int, game_type: Text, session: aiohttp.Clien
 async def get_summary(game_id: int, session: aiohttp.ClientSession) -> pd.DataFrame:
     """Returns the match summary."""
     link = create_summary_link(game_id)
-    response = await session.get(link)
-    response.raise_for_status()
+    response = await fetch_with_retry(link, session, 500)
     data = await response.json()
     match_details = MatchDetails(game_id, data)
     return pd.DataFrame([match_details.to_row()], columns=MatchDetails.get_header())
@@ -231,17 +236,17 @@ if __name__ == '__main__':
     missed = download(1, years)
     logging.debug(f'Missed in Tests: {missed}')
     
-    logging.info('Downloading ODIs...')
-    missed = download(2, years)
-    logging.debug(f'Missed in ODIs: {missed}')
+    # logging.info('Downloading ODIs...')
+    # missed = download(2, years)
+    # logging.debug(f'Missed in ODIs: {missed}')
 
-    logging.info('Downloading T20Is...')
-    missed = download(3, years)
-    logging.debug(f'Missed in T20Is: {missed}')
+    # logging.info('Downloading T20Is...')
+    # missed = download(3, years)
+    # logging.debug(f'Missed in T20Is: {missed}')
 
-    logging.info('Downloading T20s...')
-    missed = download(6, years)
-    logging.debug(f'Missed in T20Is: {missed}')
+    # logging.info('Downloading T20s...')
+    # missed = download(6, years)
+    # logging.debug(f'Missed in T20Is: {missed}')
     
     
     
